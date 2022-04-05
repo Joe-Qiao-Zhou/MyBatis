@@ -126,6 +126,8 @@
         <!--配置别名-->
         <typeAliases>
             <typeAlias type="domain.User" alias="user"></typeAlias>
+            <!--包中所有类都取别名-->
+            <package name="domain"/>
         </typeAliases>
     
         <!--10.配置环境-->
@@ -315,6 +317,10 @@
   
   2. 编写`QueryVo`类，方便复杂查询
   
+     - OGNL表达式：Object graphic Navigation Language，对象图导航语言，在写法上把取值方法的get省略，例如user.username；mybatis中由于ResultType已经传递类名，所以直接不需要写对象名
+  
+     - pojo对象：Plain Ordinary Java Object，简单的Java对象，即JavaBeans
+  
      ```java
      public class QueryVo {
          private User user;
@@ -375,8 +381,11 @@
      
          <select id="findInIds" parameterType="domain.QueryVo" resultType="user">
              select * from user
+             <!--<where>标签用于包裹<if>标签，不需要写where 1=1-->
              <where>
+                 <!--<if>标签用于多条件查询，查询语句中要写where 1=1-->
                  <if test="ids != null and ids.size() > 0">
+                     <!--<foreach>标签用于in查询-->
                      <foreach collection="ids" open="and id in (" close=")" item="id" separator=",">
                          #{id}
                      </foreach>
@@ -503,35 +512,7 @@
 
 - 返回插入后的id：在`<select>`标签中加入`<selectKey keyProperty="id" keyColumn="id" resultType="int" order="AFTER"> select last_insert_id();`
 
-## 参数与返回值
-
-- OGNL表达式：Object graphic Navigation Language，对象图导航语言，在写法上把取值方法的get省略，例如user.username；mybatis中由于ResultType已经传递类名，所以直接不需要写对象名
-
-- pojo对象：Plain Ordinary Java Object，简单的Java对象，即JavaBeans
-
-- 定义QueryVo对象进行多表查询
-
-  - `private User user;`
-
-  - `List<User> findByVo(QueryVo vo);`
-
-  - ```xml
-        <select id="findByVo" parameterType="domain.QueryVo" resultType="domain.User">
-            select *
-            from user
-            where username like #{user.username};
-        </select>
-    ```
-
-  - ```java
-            QueryVo vo = new QueryVo();
-            User user = new User();
-            user.setUsername("%王%");
-            vo.setUser(user);
-            List<User> users = userDao.findByVo(vo);
-    ```
-
-- 如果修改属性名不予列名相同，删改查只需要修改对应位置，但是增的话无法成功，因为找不到对应列，但windows不区分大小写，所以只是大小写不同也能插入
+- 如果修改的属性名与列名不同，删改查只需要修改对应位置，但是增的话无法成功，因为找不到对应列，但windows不区分大小写，所以只是大小写不同也能插入
 
   - 解决办法
 
@@ -549,132 +530,112 @@
       <select resultMap="userMap"></select>
       ```
 
-      
 
 ## DAO编写(跳过)
 
 - 实现类中定义SqlSessionFactory，并在构造函数中传值
 - 在每个方法中获取SqlSession对象，调用selectList方法传入类名和方法名
 
-## 配置细节
+# 三、深入与多表
 
-### 几个标签的使用
-
-- \<properties>：将原先\<property>的内容定义到其中，在底下value属性中使用"${name}"来引用以解耦，这样就可以将配置信息放在外部文件中，通过resource属性输入文件名获取；url属性更麻烦一点，要写完整
-
-- ```xml
-  // 取别名后不再区分大小写
-  <typeAliases>
-      <typeAlias type="domain.User" alias="user"></typeAlias>
-      <package name="domain"/>
-  </typeAliases>
-  ```
-
-- `<package name="domain"></package>`，包中所有类都取别名
-
-- mappers中也有\<package>，写的是dao接口所在的包，写完后就不需要再写mapper、resource和class了
-
-- if标签用于多条件查询，查询语句中要写where 1=1
-
-- where标签用于包裹if标签，不需要写where 1=1
-
-- foreach标签用于in查询
-
-  ```xml
-      <select id="findInIds" parameterType="domain.QueryVo" resultType="user">
-          select * from user
-          <where>
-              <if test="ids != null and ids.size() > 0">
-                  <foreach collection="ids" open="and id in (" close=")" item="id" separator=",">
-                      #{id}
-                  </foreach>
-              </if>
-          </where>
-      </select>
-  ```
-
-- sql标签用于定义sql语句，include标签用于引入语句，解决重复书写的问题
-
-  ```xml
-  <sql id="select*">
-          select * from user
-      </sql>
-  
-      <select id="findById" parameterType="Integer" resultType="domain.User">
-          <include refid="select*"></include>
-          where id = #{id};
-      </select>
-  ```
-
-# 深入与多表
-
-## 连接池(JNDI跳过)
+## 1.连接池
 
 - 一个集合对象，必须保证线程安全，且满足队列特性
 - mybatis提供了3种配置方式
-  - 配置位置：主配置文件的dataSource标签，type属性表示采用何种连接池方式，POOLED、UNPOOLED、JNDI，第二种是传统的获取连接方式，没有使用池的思想，最后一种采用不同服务器提供的技术获取不同DataSource对象，只有web或maven的war工程才能使用
+  - 配置位置：主配置文件中的`<dataSource>`标签，type属性表示采用何种连接池方式，POOLED、UNPOOLED、JNDI，最后一种采用不同服务器提供的技术获取不同的DataSource对象，只有web或maven的war工程才能使用
   - 原理：一共有空闲池和活动池两个连接池，如果空闲池没有就去活动池，如果活动池数量小于限制就创建一个新的，不然就把最先返回的对象给新线程
 
-## 事务控制与设计方法
+## 2.多表查询
 
-- 什么是事务？事务的四大特性ACID？不考虑隔离性会产生的3大问题？解决办法：4种隔离级别
+- mybatis把多对一看成一对一：一个账户只能属于一个用户/多个账户可以属于一个用户
 
-## 多表查询
 
-- mybatis把多对一看成一对一，一个账户只能属于一个用户/多个账户可以属于一个用户
+### 2.1 一对一
 
-- 一对一
+1. 在从表实体类`Account`中定义一个主表实体的对象引用`private User user;`
 
-  1. 在Account类中定义`private User user;`
+1. 在`AccountDao.xml`中封装`Account`和`User`类的`resultMap`
 
-  2. ```xml
-     <!--    定义封装account和user的resultMap-->
-     <resultMap id="accountUserMap" type="account">
-         <!-- 这里的uid是sql语句中起的别名 -->
-         <id property="id" column="aid"></id>
-         <result property="uid" column="uid"></result>
-         <result property="MONEY" column="MONEY"></result>
-         <!--        一对一的关系映射-->
-         <association property="user" column="uid" javaType="user">
-             <id property="id" column="id"></id>
-             <result property="username" column="username"></result>
-             <result property="birthday" column="birthday"></result>
-             <result property="sex" column="sex"></result>
-             <result property="address" column="address"></result>
-         </association>
-     ```
+   ```xml
+   <?xml version="1.0" encoding="UTF-8"?>
+   <!DOCTYPE mapper
+         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+   <mapper namespace="dao.AccountDao">
+   	<!--定义封装account和user的resultMap-->
+   	<resultMap id="accountUserMap" type="account">
+     		<!-- column中为列名或别名 -->
+     		<!--<id>标签用来定义主键-->
+     		<id property="id" column="aid"></id>
+    		<result property="uid" column="uid"></result>
+    		<result property="MONEY" column="MONEY"></result>
+     		<!--一对一的关系映射使用<association>标签-->
+     		<association property="user" column="uid" javaType="user">
+         		<id property="id" column="id"></id>
+        		<result property="username" column="username"></result>
+         		<result property="birthday" column="birthday"></result>
+         		<result property="sex" column="sex"></result>
+         		<result property="address" column="address"></result>
+     		</association>
+       </resultMap>
+       <!--定义方法-->
+       <select id="findAll" resultMap="accountUserMap">
+           select u.*, a.id as aid, a.uid, a.MONEY from account a, user u where a.uid = u.id
+       </select>
+   </mapper>
+   ```
 
-###  一对多
+###  2.2 一对多
 
-1. 在User类中定义一对多关系映射`private List<Account> accounts;`
+1. 在`User`类中定义一对多关系映射`private List<Account> accounts;`
 
-2. ```xml
+2. 编写`UserDao.xml`
+
+   ```xml
+   <?xml version="1.0" encoding="UTF-8"?>
+   <!DOCTYPE mapper
+           PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+           "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+   <mapper namespace="dao.UserDao">
        <resultMap id="userAccountMap" type="user">
            <id property="id" column="id"></id>
            <result property="username" column="username"></result>
            <result property="birthday" column="birthday"></result>
            <result property="sex" column="sex"></result>
            <result property="address" column="address"></result>
-   <!--        配置user对象中accounts集合的映射-->
+   		<!--配置user对象中accounts集合的映射，因此要使用ofType-->
            <collection property="accounts" ofType="account">
                <id property="id" column="aid"></id>
                <result property="uid" column="UID"></result>
                <result property="MONEY" column="MONEY"></result>
            </collection>
-   ```
-
-3. ```xml
+   
+       </resultMap>
        <select id="findAll" resultMap="userAccountMap">
-           -- 方法体
            select u.*, a.ID as aid, a.UID, a.MONEY from user u left outer join account a on u.id = a.uid
        </select>
+   
+       <select id="findById" parameterType="Integer" resultType="domain.User">
+           select * from user where id = #{id};
+       </select>
+   
+   </mapper>
    ```
 
-### 多对多
+### 2.3 多对多
 
-1. Role中添加多对多关系映射`private List<User> users;`
+- 多对多会被拆分为2个一对多处理
 
-2. ```xml
+1. 在`Role`类中添加多对多关系映射`private List<User> users;`
+
+2. 编写`RoleDao.xml`
+
+   ```xml
+   <?xml version="1.0" encoding="UTF-8"?>
+   <!DOCTYPE mapper
+           PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+           "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+   <mapper namespace="dao.RoleDao">
        <resultMap id="roleMap" type="role">
            <id property="roleId" column="rid"></id>
            <result property="roleName" column="ROLE_NAME"></result>
@@ -687,64 +648,108 @@
                <result property="birthday" column="birthday"></result>
            </collection>
        </resultMap>
-   ```
-
-3. ```xml
        <select id="findAll" resultMap="roleMap">
            select u.*, r.id as rid, r.role_name, r.role_desc from role r 
            left outer join user_role ur on r.id = ur.rid 
            left outer join user u on u.id = ur.uid
        </select>
+   </mapper>
    ```
 
-# 缓存与注解开发
+3. `User`类和`UserDao.xml`同理
 
-## 加载时机/查询时机
+# 四、缓存与注解开发
 
-- 延迟加载：按需加载/懒加载，一对多、多对多
+## 1.加载时机/查询时机
+
+- 延迟加载：按需加载/懒加载，适用于一对多和多对多查询
 
   1. 修改select语句，去掉连接操作，只保留查询本表操作
 
-  2. 将association/collections标签下的配置也删除，select属性填入**另一个表查询方法**的全类名并将该方法的resultmap改为resulttype
-
-  3. association标签中的select属性填入方法的全类名
-
-  4. 但是为了调用必须在全局配置文件中，configuration标签下，properties标签后配置settings标签
+  2. 改写一对一的`<association>`标签以及一对多的`<collections>`标签，`select`属性填入**另一个表查询方法**的全类名，`column`属性为查询时要连接的列名
 
      ```xml
-         <settings>
-             <!--        打开延迟加载-->
-             <setting name="lazyLoadingEnabled" value="true"/>
-             <!--        改为按需加载而非全部加载-->
-             <setting name="aggressiveLazyLoading" value="false"/>
-         </settings>
+     <association property="user" javaType="user"
+                  select="方法的全限定类名"
+                  column="uid">
+     </association>  
+     
+     <collection property="accounts" ofType="account"
+                  select="方法的全限定类名"
+                  column="uid">
+     </collection> 
      ```
 
-- 立即加载：只要调用就查询，一对一、多对一
+  3. `<select>`标签的sql语句也需要修改，只保留查询本表的操作，查询其他表由方法的全限定类名提供
 
-## 一级缓存与二级缓存
+  4. 在全局配置文件`SqlMapConfig.xml`中的`<configuration>`标签下，`<properties>`标签后配置`<settings>`标签
 
-- 经常查询且不常改变、数据正确性影响不大
-- 一级缓存：指的是SqlSession对象的缓存，查询的结果回存入SqlSession提供的一块区域中，该区域是块Map；
-  - SqlSession.close()和clearCache()都可以清除缓存
-  - 当修改删除添加操作以及事务提交都会清空缓存
-- 二级缓存：指的是SqlSessionFactory对象的缓存，由同一个工厂对象创建的SqlSession共享其缓存
-  1. 让mybatis支持二级缓存，在全局配置文件中配置：`<setting name="cacheEnabed" value="true"/>`
-  2. 让当前映射文件支持二级缓存，UserDao.xml：`<cache/>`
-  3. 让当前操作支持二级缓存，select标签：userCache属性为true
-  4. 二级缓存中存放的是数据而非对象，不同于一级缓存
-- 注解开发的二级缓存：只需要在Dao类上使用@CacheNameSpace(blocking=true)
+     ```xml
+     <configuration>
+         <!--配置properties-->
+         <properties resource="jdbcConfig.properties"></properties>
+         <settings>
+             <!--打开延迟加载-->
+             <setting name="lazyLoadingEnabled" value="true"/>
+             <!--改为按需加载而非全部加载-->
+             <setting name="aggressiveLazyLoading" value="false"/>
+         </settings>
+     </configuration>
+     ```
 
-## 注解开发
+- 立即加载：只要调用就查询，适用于一对一和多对一查询
 
-### 单表CRUD
+## 2.一级缓存与二级缓存
 
-- 在mybatis中针对CURD共有四个注解：@Select @Insert @Update @Delete
+- 用于存储经常查询且不常改变、对正确性要求不高的数据
+- 一级缓存：指的是`SqlSession`对象的缓存，查询的结果回存入其提供的一块Map区域中
+  - `SqlSession`的`close()`方法和`clearCache()`方法都可以清除缓存
+  - 当执行增删改操作以及事务提交后都会清空缓存
+- 二级缓存：指的是`SqlSessionFactory`对象的缓存，由同一个工厂对象创建的`SqlSession`对象共享
+  1. 在全局配置文件中进行配置使mybatis支持二级缓存：`<setting name="cacheEnabed" value="true"/>`
+  2. 让每个Dao接口的映射文件支持二级缓存：使用`<cache/>`标签
+  3. 让当前操作支持二级缓存：设置`<select>`标签的`useCache`属性为true
+  4. 不同于一级缓存，二级缓存中存放的是数据而非对象
+- 注解开发使用二级缓存：只需要在Dao接口上使用`@CacheNameSpace(blocking=true)`
 
-- 使用注解开发时，只要同样目录中存在对应dao的xml文件，不论是否配置mapper.class属性都会报错；要不删掉要不挪到其他位置
+## 3.注解开发
+
+### 3.1 单表CRUD
+
+- mybatis中针对CURD共有四个注解：`@Select @Insert @Update @Delete`
+
+- 使用注解开发时，只要同样目录中存在对应dao接口的xml文件，不论是否配置mapper.class属性都会报错，要不删掉要不挪到其他位置
 
 - 如果属性名不一致，在一个方法上使用Results标签，其他方法使用ResultMap标签
 
+  ```java
+  public interface UserDao {
+      @Select("select * from user ")
+      List<User> findAll();
+  
+      @Insert("insert into user(username, address, sex, birthday) values (#{username}, #{address},#{sex},#{birthday} ) ")
+      void saveUser(User user);
+  
+      @Update("update user set username=#{username}, sex=#{sex}, birthday=#{birthday}, address=#{address} where id=#{id} ")
+      void updateUser(User user);
+  
+      @Delete("delete from user where id=#{id} ")
+      void deleteUser(Integer userId);
+  
+      @Select("select * from user where id=#{id} ")
+      User findById(Integer userId);
+  
+      @Select("select * from user where username like #{username}")
+  //    @Select("select * from user where username like '%${value}%' ")
+      List<User> findUserByName(String username);
+  
+      @Select("select count(*) from user ")
+      int findTotalUser();
+  }
+  ```
+  
+  
+  
   ```java
   @Results(id="userMap",value={
       @Result(id=true,column="id",property="userid"),
@@ -754,18 +759,18 @@
   @ResultMap(value={"userMap"})
   ```
 
-### 多表查询
+### 3.2 多表查询
 
 - 一对一
 
-  ```xml
-      @Select("select * from account ")
-      @Results(id = "accountMap", value = {
-              @Result(id = true, column = "id", property = "id"),
-              @Result(column = "uid", property = "uid"),
-              @Result(column = "money", property = "money"),
-              @Result(column = "uid", property = "user", one = @One(select = "dao.UserDao.findById", fetchType = FetchType.EAGER))
-      })
+  ```java
+  @Select("select * from account ")
+  @Results(id = "accountMap", value = {
+          @Result(id = true, column = "id", property = "id"),
+          @Result(column = "uid", property = "uid"),
+          @Result(column = "money", property = "money"),
+          @Result(column = "uid", property = "user", one = @One(select = "dao.UserDao.findById", fetchType = FetchType.EAGER))
+  })
   ```
 
-- 一对多：将one换成many，EAGER换成LAZY
+- 一对多：将`@one`换成`@many`，EAGER换成LAZY
